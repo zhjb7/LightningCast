@@ -41,11 +41,11 @@ The LightningCastServer creates a Binder service `LightningcastService` and 5 th
 
 #### (1) Binder Service `LightningcastService`
 
-The Binder API created by the `LightningcastService` includes a method called `getCastDeviceSize`, which is used by **AudioTrack**. Other APIs are used by **LightningCast-SystemUI** and **LightningCast-Settings**. After receiving a call from **LightningCast-SystemUI** or **LightningCast-Settings**, the server composes a JSON message and stores it in a MessageQueue to avoid blocking the UI.
+The Binder API created by the `LightningcastService` includes a method called `getCastDeviceSize`, which is used by **AudioTrack**. Other APIs are used by **LightningCast-SystemUI** and **LightningCast-Settings**. After receiving a call from **LightningCast-SystemUI** or **LightningCast-Settings**, the server composes a JSON message and stores it in a MessageQueue to avoid blocking the SystemUI or Settings.
 
 #### (2) MessageConsumer Thread
 
-This thread sequentially processes each message in the MessageQueue. These messages include operations for retrieving and setting LightningCast device properties, selecting or deselecting devices, and setting the device’s volume or mute state.
+This thread sequentially processes each message in the MessageQueue. These messages include operations for retrieving and setting LightningCast device properties, selecting or deselecting devices, and adjusting the device’s volume or mute state.
 
 #### (3) QueryMDNS Thread
 
@@ -53,7 +53,7 @@ If a LightningCast device goes offline due to a shutdown or network disconnectio
 
 #### (4) PipeSender Thread
 
-The PipeSender thread creates a named pipe (`snapfifo`). After receiving a message to start playback, the server notifies the thread to enter a loop, reading audio data from a `ByteQueueBuffer` and writing it to `snapfifo`, where the SnapServer thread will read it.
+The PipeSender thread creates a named pipe (`snapfifo`). After receiving a message to start playback, the server notifies this thread to enter a loop, reading audio data from the `ByteQueueBuffer` and writing it to `snapfifo`, where the SnapServer thread will read it.
 
 #### (5) SnapServer Thread
 
@@ -63,22 +63,22 @@ When the server receives a start playback message, the SnapServer thread begins 
 
 The Connect thread creates 4 socket servers:
 
-- Unix domain socket servers for transferring Android non-audio data (like Metadata).
-- A Unix domain socket server for audio data transfer.
-- TCP servers for non-audio communication (like Metadata) with LightningCast devices.
-- TCP servers for device configuration communication with LightningCast devices.
+- A Unix domain socket server for transferring non-audio data (e.g., Metadata) within Android.
+- A Unix domain socket server for transferring audio data.
+- A TCP server for transferring non-audio data (e.g., Metadata) to LightningCast devices.
+- A TCP server for device configuration communication with LightningCast devices.
 
 For each connected client, a `ClientInfo` instance is created, containing the client’s file descriptor (fd), type, and IP address. Based on the type, the appropriate handling process is triggered.
 
 #### (a) Communication with Other Android Modules
 
-The **MediaSession** layer is Java code, and the **AudioTrack** layer is C++ code, but both belong to the same app and share the same UID and PackageName. The LightningCastServer uses this information to create or update the corresponding `MusicInfo` for the app. Each app corresponds to one `MusicInfo`, which includes metadata, cover art, sample rate, etc.
+The **MediaSession** layer is Java code, and the **AudioTrack** layer is C++ code, but both belong to the same app and share the same UID and PackageName. This allows the LightningCastServer to create or update the corresponding `MusicInfo` for the app. Each app corresponds to one `MusicInfo`, which includes the app's metadata, cover art, sample rate, etc.
 
-The server has an `mActive_uid` variable to indicate which app is currently casting. When receiving the audio format (sample rate) from AudioTrack, it only saves the UID, PortID, and audio format, without updating the `MusicInfo`. This is because one app can have multiple AudioTracks, particularly for apps with crossfade functionality. When the `AudioTrack` starts, the server disconnects all non-audio connections and sends metadata, audio format, duration, and start play information to the connected devices. It then instructs other apps to stop playing.
+The server has a variable `mActive_uid` to indicate which app is currently casting. When receiving the audio format (sample rate) from AudioTrack, it only saves the UID, PortID, and audio format, without updating the `MusicInfo`. This is because the same app can have multiple AudioTracks, especially in apps with crossfade functionality. After receiving the AudioTrack start message, the server disconnects all non-audio connections for the app except for the current AudioTrack and sends metadata, audio format, duration, and start play information to all connected devices. It then instructs PipeSender and SnapServer to start working, while ensuring that all other apps stop playback.
 
 #### (b) Communication with LightningCast Devices
 
-When a LightningCast device is selected, the server connects to the device’s TCP server and sends an open message. The LightningCast device then connects back to the LightningCastServer. The server sends metadata and receives reverse control messages from the device. If the server does not receive a heartbeat message from the device for 5 seconds, it disconnects.
+When a LightningCast device is selected, the LightningCastServer connects to the device’s TCP server as a TCP client and sends an open message. The LightningCast device then connects back to the LightningCastServer. The server sends metadata and other information to the device, while also receiving reverse control messages from the device. If no heartbeat message is received from the device for more than 5 seconds, the server disconnects from the device.
 
 ### MediaSession
 
@@ -94,4 +94,4 @@ The **SystemUI** and **Settings** are customized to add a LightningCast item, wh
 
 ### LightningCastManager, LightningCastApplication
 
-Both **LightningCastManager** and **LightningCastApplication** are automatically loaded when Android starts. The **LightningCastManager** handles reverse control, allowing LightningCast devices (via buttons or remote control) to control the app’s playback or adjust Android's volume. **LightningCastApplication** is responsible for MDNS discovery of LightningCast devices. When a device goes online or offline, it triggers calls to the `LightningCastServer` Binder API, which then updates **LightningCast-SystemUI** and **LightningCast-Settings**.
+**LightningCastManager** and **LightningCastApplication** are automatically loaded when Android starts. **LightningCastManager** is responsible for implementing reverse control for LightningCast devices, such as allowing the device to control the app's playback or adjust the Android volume using buttons or a remote control. **LightningCastApplication** handles MDNS discovery of LightningCast devices. When a device goes online or offline, it triggers calls to the LightningCastServer Binder API, which updates the **LightningCast-SystemUI** and **LightningCast-Settings**.
